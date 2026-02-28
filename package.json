@@ -1,0 +1,11 @@
+{
+  "name": "iptv-worker",
+  "version": "1.0.0",
+  "description": "IPTV M3U merge service on Cloudflare Workers",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
