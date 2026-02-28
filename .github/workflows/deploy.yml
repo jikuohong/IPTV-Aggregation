@@ -17,18 +17,3 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-```
-
----
-
-## 完成后的工作流
-```
-修改 src/worker.js
-      ↓
-git push 到 main 分支
-      ↓
-GitHub Actions 自动触发
-      ↓
-wrangler deploy 部署到 Cloudflare Workers
-      ↓
-通常 1~2 分钟内生效
