@@ -1,238 +1,198 @@
-# IPTV 合并服务
+# 📺 IPTV M3U Merge Worker
 
-基于 Cloudflare Workers 的 IPTV M3U 播放列表聚合工具。从多个公网 M3U 源并发抓取频道，自动分类、去重、标准化频道名称，生成三个版本的播放列表供订阅使用。
+基于 Cloudflare Workers 的 IPTV 直播源聚合服务。自动抓取多个 M3U 信号源，去重合并后输出三种规格的订阅文件，并提供 Web 管理界面。
 
 ---
 
 ## 功能特性
 
-- 多源并发抓取，自动合并去重
-- 频道名称标准化（CCTV-1 / CCTV 1 HD / CCTV1综合 → CCTV1，CCTV5+ 独立保留）
-- 央视频道按数字顺序排列（CCTV1、CCTV2、CCTV3…）
-- 按地区 / 类型自动分类（央视、卫视、港台、国际等）
-- 生成完整版 / 精简版 / 央视版三份播放列表
-- 每天定时自动更新两次（Cron 触发）
-- 状态页密码登录保护，M3U 订阅地址公开访问
-- 状态页显示 Cloudflare 免费额度实时用量
-- 点击订阅卡片一键复制链接
-- 手动构建按钮，构建完成后自动刷新页面
-- Telegram 通知：定时构建、手动构建、订阅拉取均推送消息
-- 支持 GitHub 托管 + Cloudflare Workers 自动部署
+- **多源聚合**：并发抓取多个 M3U 信号源，自动去重合并
+- **智能分组**：自动识别频道所属地区与分类（央视 / 卫视 / 港台 / 国际）
+- **频道标准化**：内置别名映射，将同一频道的不同写法统一（如 `DRAGONTV` → `东方卫视`）
+- **三档订阅**：输出完整版、精简版（央视+卫视+港台）、央视版三种 M3U 文件
+- **Web 管理页**：无需重新部署即可管理信号源、黑白名单、别名、构建频率
+- **定时自动构建**：Cron 定时触发 + 软控制最小间隔，灵活控制更新频率
+- **Telegram 通知**：构建完成后推送结果，包含频道变化 Diff（新增/消失频道）
+- **历史构建趋势**：保留最近 7 次构建记录，状态页可视化展示
+- **Cloudflare 用量监控**：实时显示 Worker 请求数和 KV 操作数（需配置 API Token）
 
 ---
 
-## 文件结构
+## 部署步骤
 
-```
-iptv-worker/
-├── src/
-│   └── worker.js              ← Worker 主程序
-├── .github/
-│   └── workflows/
-│       └── deploy.yml         ← GitHub Actions 自动部署
-├── wrangler.toml              ← Cloudflare 部署配置
-├── package.json
-├── .gitignore
-└── README.md
-```
+### 1. 创建 KV 命名空间
 
----
+在 Cloudflare 控制台 → Workers & Pages → KV，创建一个命名空间，记录其 ID。
 
-## 部署方式一：网页手动部署（无需命令行）
-
-### 第一步：创建 KV 存储空间
-
-1. 登录 [dash.cloudflare.com](https://dash.cloudflare.com)
-2. 左侧菜单 → **Workers 和 Pages** → **KV**
-3. 点击右上角 **创建命名空间**，名称填写 `IPTV_KV`，点击 **添加**
-4. 创建完成后记录 Namespace ID（进入详情页后在 URL 末尾或**设置**标签页中查看）
-
-### 第二步：创建 Worker
-
-1. 左侧菜单 → **Workers 和 Pages** → **创建** → **创建 Worker**
-2. 名称随意填写，例如 `iptv-merger`，点击 **部署**
-
-### 第三步：粘贴代码
-
-1. 进入 Worker 主页 → 点击右上角 **编辑代码**
-2. 删除全部默认内容，将 `src/worker.js` 内容粘贴进去
-3. 点击右上角 **部署**
-
-### 第四步：绑定 KV
-
-1. Worker → **设置** → **绑定** → **添加** → **KV 命名空间**
-2. 变量名称填写 `IPTV_KV`，选择对应的命名空间
-3. 点击 **保存**
-
-### 第五步：配置环境变量
-
-Worker → **设置** → **变量和机密** → **添加变量**，依次填入所需变量（见文末环境变量汇总表）。
-
-### 第六步：设置定时更新（可选）
-
-1. Worker → **设置** → **触发器** → **Cron 触发器**
-2. 添加以下两条（对应北京时间早 10 点和凌晨 2 点）：
-   - `0 2 * * *`
-   - `0 18 * * *`
-
----
-
-## 部署方式二：GitHub + 自动部署
-
-代码托管在 GitHub，每次推送到 `main` 分支后，GitHub Actions 自动调用 Wrangler 部署到 Cloudflare Workers。
-
-### 第一步：准备仓库
-
-Fork 或克隆本仓库到你的 GitHub 账户。
-
-### 第二步：修改 wrangler.toml
-
-将 `wrangler.toml` 中的 KV Namespace ID 替换为你自己的：
+### 2. 配置 wrangler.toml
 
 ```toml
-name = "iptv-merger"
-main = "src/worker.js"
+name = "iptv-worker"
+main = "worker.js"
 compatibility_date = "2024-01-01"
 
 [[kv_namespaces]]
 binding = "IPTV_KV"
-id = "你的KV_NAMESPACE_ID"    ← 替换这里
+id = "你的KV命名空间ID"
+
+[triggers]
+# 每小时触发一次作为检查器，实际构建间隔由管理页控制
+crons = ["0 * * * *"]
 ```
 
-### 第三步：创建 Cloudflare API Token
+### 3. 配置环境变量
 
-此 Token 用于授权 GitHub Actions 部署 Worker：
-
-1. Cloudflare 控制台 → 右上角头像 → **我的个人资料** → **API 令牌** → **创建令牌**
-2. 拉到底部选择 **创建自定义令牌**
-3. 权限配置：
-
-   | 第一列 | 第二列 | 第三列 |
-   |--------|--------|--------|
-   | 账户 | Workers 脚本 | 编辑 |
-
-4. 账户资源选择你的账户，点击创建并复制 Token
-
-### 第四步：配置 GitHub Secrets
-
-在 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**，添加以下两个：
-
-| Secret 名称 | 值 |
-|------------|---|
-| `CLOUDFLARE_API_TOKEN` | 上一步创建的 Token |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账户 ID（控制台右侧边栏复制）|
-
-### 第五步：推送代码触发部署
-
-```bash
-git add .
-git commit -m "deploy"
-git push origin main
-```
-
-GitHub Actions 会自动运行，约 1～2 分钟完成部署。可在仓库的 **Actions** 标签页查看进度。
-
-### 第六步：配置 KV 绑定和环境变量
-
-自动部署只负责上传代码，KV 绑定和环境变量仍需在 Cloudflare 控制台手动配置（同部署方式一的第四、五步）。
-
-> 环境变量不会被部署覆盖，只需配置一次。
-
----
-
-## 访问地址
-
-| 路径 | 说明 | 是否需要登录 |
-|------|------|------------|
-| `/` | 状态看板 | ✅ 需要 |
-| `/full.m3u` | 完整版（全部频道）| ❌ 公开 |
-| `/lite.m3u` | 精简版（央视 + 卫视 + 港台）| ❌ 公开 |
-| `/cctv.m3u` | 央视版（仅央视）| ❌ 公开 |
-| `/login` | 登录页 | — |
-| `/logout` | 退出登录 | — |
-| `/rebuild` | 手动触发构建 | ✅ 需要 |
-
----
-
-## 配置 Telegram 通知（可选）
-
-配置后以下三种情况会自动推送 TG 消息：
-
-| 触发场景 | 消息内容 |
-|---------|---------|
-| ⏰ Cron 定时构建完成 | 频道数、信号源状态、文件大小、耗时 |
-| 🔧 手动点击构建完成 | 同上 |
-| 📥 有人拉取订阅文件 | 文件名、时间、IP、客户端（同一文件 1 小时内只通知一次）|
-
-**获取 Bot Token：**
-1. 在 Telegram 搜索 `@BotFather`，发送 `/newbot`
-2. 按提示设置机器人名称，完成后复制返回的 Token
-
-**获取 Chat ID：**
-1. 给你的机器人发一条任意消息
-2. 浏览器访问：`https://api.telegram.org/bot你的TOKEN/getUpdates`
-3. 找到 `"chat":{"id": 数字}` 中的数字即为 Chat ID
-
----
-
-## 配置 Cloudflare 用量监控（可选）
-
-配置后状态页顶部显示今日 Worker 请求数、KV 读写次数及免费额度进度条，超过 70% 变黄、90% 变红预警。
-
-**获取 CF_ACCOUNT_ID：**
-登录 Cloudflare 控制台，右侧边栏「账户 ID」直接复制。
-
-**获取 CF_API_TOKEN（用量读取专用）：**
-1. 右上角头像 → **我的个人资料** → **API 令牌** → **创建令牌** → **创建自定义令牌**
-2. 权限配置：
-
-   | 第一列 | 第二列 | 第三列 |
-   |--------|--------|--------|
-   | 账户 | 账户分析 | 读取 |
-
-3. 账户资源选择你的账户，创建并复制 Token（建议设为加密类型）
-
-**获取 CF_KV_NAMESPACE_ID：**
-Cloudflare 控制台 → **Workers KV** → 点击 `IPTV_KV` → 在**设置**标签页中复制 Namespace ID。
-
-> 用量数据来自 Cloudflare Analytics API，有 5～30 分钟延迟，属正常现象。
-
----
-
-## 环境变量汇总
+在 Cloudflare 控制台 → Worker → 设置 → 变量和机密 中添加：
 
 | 变量名 | 必填 | 说明 |
-|--------|:----:|------|
-| `AUTH_PASSWORD` | ✅ | 状态页登录密码，建议设为加密类型 |
-| `M3U_SOURCES` | ✅ | M3U 源列表，每行一条，格式：`URL 地区` |
-| `TG_TOKEN` | 可选 | Telegram Bot Token |
-| `TG_CHAT_ID` | 可选 | Telegram Chat ID |
-| `CF_ACCOUNT_ID` | 可选 | Cloudflare 账户 ID（用量监控）|
-| `CF_API_TOKEN` | 可选 | Cloudflare API Token（账户分析读取权限）|
-| `CF_WORKER_NAME` | 可选 | Worker 名称，如 `iptv-merger` |
-| `CF_KV_NAMESPACE_ID` | 可选 | KV 命名空间 ID |
+|--------|------|------|
+| `AUTH_PASSWORD` | 否 | 管理页访问密码，留空则不需要登录 |
+| `M3U_SOURCES` | 否 | 初始信号源列表（见格式说明），可在管理页覆盖 |
+| `TG_TOKEN` | 否 | Telegram Bot Token，用于构建通知 |
+| `TG_CHAT_ID` | 否 | Telegram 接收通知的 Chat ID |
+| `CF_API_TOKEN` | 否 | Cloudflare API Token，用于用量监控 |
+| `CF_ACCOUNT_ID` | 否 | Cloudflare 账号 ID，用于用量监控 |
+| `CF_WORKER_NAME` | 否 | Worker 名称，用于用量监控 |
+| `CF_KV_NAMESPACE_ID` | 否 | KV 命名空间 ID，用于精确的 KV 用量统计 |
 
-`M3U_SOURCES` 格式示例：
+**`M3U_SOURCES` 格式**（每行一个，格式为 `URL 地区`）：
 
 ```
 https://example.com/source1.m3u 中国大陆
 https://example.com/source2.m3u 中国香港
 https://example.com/source3.m3u 中国台湾
-https://example.com/source4.m3u 国际
 ```
 
-支持的地区名称：`中国大陆`、`中国香港`、`中国澳门`、`中国台湾`，其余均归入国际频道。
+### 4. 部署
+
+```bash
+wrangler deploy
+```
+
+### 5. 首次构建
+
+部署后访问 Worker 域名，登录后点击「立即构建」，或等待 Cron 自动触发。
 
 ---
 
-## 免费版额度说明
+## 路由说明
 
-| 资源 | 免费额度 | 说明 |
-|------|---------|------|
-| Worker 请求数 | 100,000 次 / 天 | 每次访问状态页或下载 M3U 消耗 1 次 |
-| KV 读取 | 100,000 次 / 天 | 每次请求读取数据 |
-| KV 写入 | 1,000 次 / 天 | 每次构建写入 4 次 |
-| KV 列表 / 删除 | 1,000 次 / 天 | 登出时消耗 1 次删除 |
-| KV 存储 | 1 GB | |
+| 路径 | 访问权限 | 说明 |
+|------|----------|------|
+| `/` | 需登录 | 状态页，显示频道统计、信号源状态、历史趋势等 |
+| `/full.m3u` | 公开 | 完整订阅，包含所有频道 |
+| `/lite.m3u` | 公开 | 精简订阅，仅含央视、卫视、港台 |
+| `/cctv.m3u` | 公开 | 央视订阅，仅含 CCTV 系列频道 |
+| `/admin` | 需登录 | 管理页，配置信号源、黑白名单、别名映射、定时设置 |
+| `/rebuild` | 需登录（POST）| 手动触发构建 |
+| `/login` | 公开 | 登录页 |
+| `/logout` | 公开 | 退出登录 |
 
-日常使用完全在免费额度内。如果源数量很多导致 Cron 构建超时（免费版单次最长 30 秒），可减少源数量或升级 Workers Paid（$5 / 月）。
+订阅地址填写示例（在 TiviMate / APTV 等客户端中使用）：
+
+```
+https://your-worker.workers.dev/full.m3u
+```
+
+---
+
+## 管理页功能
+
+访问 `https://your-worker.workers.dev/admin` 进入管理页，无需重新部署即可调整以下配置：
+
+### 📡 信号源管理
+
+- 在文本框中编辑信号源列表，每行一个 `URL 地区`
+- 保存后下次构建时生效，**优先级高于环境变量 `M3U_SOURCES`**
+- 清空后自动回退使用环境变量
+
+### 🚫 频道黑白名单
+
+- **黑名单**：包含关键词的频道在构建时自动过滤（不区分大小写）
+  - 适合屏蔽购物、广告、成人等频道
+- **白名单**：若填写，则只保留包含关键词的频道（优先级高于黑名单）
+  - 留空则不启用白名单
+
+### 🔄 频道别名映射
+
+将不同来源的同名频道统一标准名称，提升去重效果。
+
+- **原始写法**：填写大写、去掉空格和连字符的形式，如 `DRAGONTVHD`
+- **标准名称**：填写希望统一显示的名称，如 `东方卫视`
+
+内置了常见卫视、港台、国际台的映射，管理页只需添加自定义扩展。
+
+### ⏱️ 定时构建 & 订阅缓存
+
+| 设置 | 默认值 | 说明 |
+|------|--------|------|
+| Cron 最小间隔 | 6 小时 | Cron 触发后，距上次构建不足此时间则跳过 |
+| 订阅缓存时长 | 30 分钟 | IPTV 客户端本地缓存 M3U 文件的时间，修改后新请求立即生效 |
+
+**软控制原理**：Cron 按 `wrangler.toml` 中的频率触发（建议每小时一次），每次触发时 Worker 检查距上次构建的时间，未达到设定间隔则自动跳过，不执行构建，也不消耗 KV 写入额度。
+
+---
+
+## KV 数据结构
+
+| Key | 说明 |
+|-----|------|
+| `full.m3u` | 完整版订阅内容 |
+| `lite.m3u` | 精简版订阅内容 |
+| `cctv.m3u` | 央视版订阅内容 |
+| `meta` | 最近一次构建的元数据（JSON） |
+| `build_history` | 最近 7 次构建记录（JSON 数组） |
+| `admin:sources` | 管理页配置的信号源列表 |
+| `admin:filters` | 黑白名单配置（JSON） |
+| `admin:aliases` | 自定义别名映射（JSON） |
+| `admin:config` | 定时与缓存配置（JSON） |
+| `usage_cache` | CF 用量查询缓存（5 分钟 TTL） |
+| `session:<token>` | 登录会话（7 天 TTL） |
+| `notify_cooldown:<file>` | 订阅通知冷却标记（1 小时 TTL） |
+
+---
+
+## Telegram 通知
+
+配置 `TG_TOKEN` 和 `TG_CHAT_ID` 后，以下情况会推送通知：
+
+- **构建完成**（定时或手动）：包含频道总数、信号源成功率、文件大小、与上次构建的频道 Diff
+- **订阅访问**：M3U 文件被下载时通知（同一文件 1 小时内只通知一次）
+
+### 创建 Telegram Bot
+
+1. 与 [@BotFather](https://t.me/BotFather) 对话，发送 `/newbot` 创建 Bot
+2. 获取 `TG_TOKEN`（格式如 `123456789:AAxxxxxx`）
+3. 将 Bot 添加到目标群组或与 Bot 私聊，发送任意消息
+4. 访问 `https://api.telegram.org/bot<TG_TOKEN>/getUpdates` 获取 `chat.id` 作为 `TG_CHAT_ID`
+
+---
+
+## 频道分组规则
+
+频道按以下规则自动归类，排序按地区和分类权重排列：
+
+| 地区 | 分类 |
+|------|------|
+| 中国大陆 | 央视、卫视、体育、新闻、影视、综艺、其他 |
+| 中国香港 | 综合、新闻、影视、体育、综艺 |
+| 中国台湾 | 综合、新闻、影视、体育、综艺 |
+| 国际频道 | 综合、新闻、影视、体育、音乐、游戏 |
+
+识别逻辑基于频道名称关键词匹配（如含「卫视」归入卫视，含「体育」归入体育），无法匹配则归入地区的「综合」或「其他」分类。
+
+---
+
+## 注意事项
+
+- M3U 文件公开访问，无需登录，建议订阅链接不要泄露
+- Cloudflare Workers 免费版每日限额：10 万次请求、KV 读取 10 万次、KV 写入 1000 次
+- 构建一次约消耗：KV 写入 5～6 次（4 个文件 + meta + history）
+- 建议 Cron 间隔不低于 4 小时，避免消耗 KV 写入额度
+- `channelNames` 字段存于 `meta` 中用于 Diff 计算，频道数多时 meta 体积会增大
+
+---
+
+## License
+
+MIT
