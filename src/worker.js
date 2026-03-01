@@ -773,12 +773,12 @@ function renderStatusPage(meta, baseUrl, usage, history) {
         <span class="src-name" title="${s.url}">${domain}</span>
         <span class="src-tag ok">正常</span>
         <div class="src-stats">
-          <span class="src-count">解析 ${s.parsed}</span>
+          <span class="src-count">解析 <b>${s.parsed}</b></span>
           <span class="src-sep">·</span>
           <span class="src-adopted">采用 <b>${adopted}</b></span>
           <span class="src-pct-wrap"><span class="src-pct-bar" style="width:${pct}%"></span></span>
           <span class="src-pct-label">${pct}%</span>
-          ${dupCount > 0 ? `<span class="src-dup">去重 ${dupCount}</span>` : ''}
+          <span class="src-dup">${dupCount > 0 ? '去重 ' + dupCount : ''}</span>
         </div>
       </div>`;
   }).join('');
@@ -908,16 +908,17 @@ function renderStatusPage(meta, baseUrl, usage, history) {
   .src-tag { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px; flex-shrink: 0; }
   .src-tag.ok   { background: #dcfce7; color: #16a34a; }
   .src-tag.fail { background: #fee2e2; color: #dc2626; }
-  .src-count { font-size: 12px; color: #aaa; flex-shrink: 0; }
   .src-err { font-size: 11px; color: #ef4444; flex-shrink: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .src-stats { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-  .src-adopted { font-size: 12px; color: #555; flex-shrink: 0; }
+  .src-stats { display: flex; align-items: center; gap: 0; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .src-count { font-size: 12px; color: #999; flex-shrink: 0; width: 72px; text-align: right; }
+  .src-count b { color: #555; font-weight: 600; }
+  .src-adopted { font-size: 12px; color: #555; flex-shrink: 0; width: 72px; text-align: right; margin-left: 14px; }
   .src-adopted b { color: #2563eb; font-weight: 600; }
-  .src-sep { font-size: 12px; color: #ddd; flex-shrink: 0; }
-  .src-pct-wrap { width: 60px; height: 5px; background: #e5e7eb; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+  .src-sep { font-size: 12px; color: #e5e7eb; flex-shrink: 0; width: 16px; text-align: center; }
+  .src-pct-wrap { width: 80px; height: 5px; background: #e5e7eb; border-radius: 3px; overflow: hidden; flex-shrink: 0; margin-left: 12px; }
   .src-pct-bar { height: 100%; background: linear-gradient(90deg, #2563eb, #06b6d4); border-radius: 3px; transition: width .4s ease; }
-  .src-pct-label { font-size: 11px; font-weight: 600; color: #2563eb; min-width: 28px; text-align: right; flex-shrink: 0; }
-  .src-dup { font-size: 11px; color: #bbb; background: #f1f5f9; padding: 1px 6px; border-radius: 10px; flex-shrink: 0; }
+  .src-pct-label { font-size: 11px; font-weight: 600; color: #2563eb; width: 36px; text-align: right; flex-shrink: 0; margin-left: 6px; }
+  .src-dup { font-size: 11px; color: #bbb; background: #f1f5f9; padding: 1px 6px; border-radius: 10px; flex-shrink: 0; width: 56px; text-align: center; margin-left: 8px; }
   .usage-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
   .usage-item { background: #f8fafc; border-radius: 12px; padding: 14px 16px; border: 1px solid #f1f5f9; }
   .usage-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
