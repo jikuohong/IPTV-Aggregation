@@ -11,36 +11,49 @@ const CCTV_ORDER = [
   "CCTV14","CCTV15","CCTV16","CCTV17","CCTV4K","CCTV8K"
 ];
 
-const GROUP_ORDER = {
-  "中国大陆 | 央视": 1,
-  "中国大陆 | 卫视": 2,
-  "中国大陆 | 体育": 3,
-  "中国大陆 | 新闻": 4,
-  "中国大陆 | 影视": 5,
-  "中国大陆 | 综艺": 6,
-  "中国大陆 | 其他": 9,
-  "中国香港 | 综合": 10,
-  "中国香港 | 新闻": 11,
-  "中国香港 | 影视": 12,
-  "中国香港 | 体育": 13,
-  "中国香港 | 综艺": 14,
-  "中国台湾 | 综合": 20,
-  "中国台湾 | 新闻": 21,
-  "中国台湾 | 影视": 22,
-  "中国台湾 | 体育": 23,
-  "中国台湾 | 综艺": 24,
-  "国际频道 | 综合": 30,
-  "国际频道 | 新闻": 31,
-  "国际频道 | 影视": 32,
-  "国际频道 | 体育": 33,
-  "国际频道 | 音乐": 34,
-  "国际频道 | 游戏": 35,
-};
-
 // 格式: 每行 "URL 地区"，用换行分隔（KV 中的 sources 优先于此）
 const FALLBACK_SOURCES = `
 https://raw.githubusercontent.com/your/repo/main/sources.m3u 中国大陆
 `.trim();
+
+// ============================================================
+//  内置分组规则常量（可在管理页覆盖，KV: admin:groupRules）
+// ============================================================
+const DEFAULT_GROUP_RULES = {
+  keywords: {
+    "新闻": ["新闻","NEWS","资讯","财经","早安"],
+    "体育": ["体育","运动","足球","篮球","竞技","五星","EUROSPORT","SPORT"],
+    "影视": ["电影","影院","剧场","CHC","影视","剧集","MOVIE","HBO","星河"],
+    "综艺": ["综艺","娱乐","生活","时尚"],
+    "音乐": ["音乐","MTV","MEZZO","CLASSIC"],
+    "游戏": ["游戏","电竞","动漫"],
+  },
+  groupOrder: {
+    "中国大陆 | 央视": 1,
+    "中国大陆 | 卫视": 2,
+    "中国大陆 | 体育": 3,
+    "中国大陆 | 新闻": 4,
+    "中国大陆 | 影视": 5,
+    "中国大陆 | 综艺": 6,
+    "中国大陆 | 其他": 9,
+    "中国香港 | 综合": 10,
+    "中国香港 | 新闻": 11,
+    "中国香港 | 影视": 12,
+    "中国香港 | 体育": 13,
+    "中国香港 | 综艺": 14,
+    "中国台湾 | 综合": 20,
+    "中国台湾 | 新闻": 21,
+    "中国台湾 | 影视": 22,
+    "中国台湾 | 体育": 23,
+    "中国台湾 | 综艺": 24,
+    "国际频道 | 综合": 30,
+    "国际频道 | 新闻": 31,
+    "国际频道 | 影视": 32,
+    "国际频道 | 体育": 33,
+    "国际频道 | 音乐": 34,
+    "国际频道 | 游戏": 35,
+  }
+};
 
 // ============================================================
 //  认证逻辑
@@ -122,44 +135,61 @@ function renderLoginPage(error = '') {
 // ============================================================
 //  工具函数
 // ============================================================
-function detectGroup(name, region) {
-  const n = name.toUpperCase();
-  const kNews    = ["新闻","NEWS","资讯","财经","早安"];
-  const kSports  = ["体育","运动","足球","篮球","竞技","五星","EUROSPORT","SPORT"];
-  const kMovie   = ["电影","影院","剧场","CHC","影视","剧集","MOVIE","HBO","星河"];
-  const kVariety = ["综艺","娱乐","生活","时尚"];
-  const kMusic   = ["音乐","MTV","MEZZO","CLASSIC"];
-  const kGame    = ["游戏","电竞","动漫"];
-  const has = (arr) => arr.some(x => n.includes(x));
+
+let _groupRulesCache = null;
+
+async function loadGroupRules(env) {
+  if (_groupRulesCache) return _groupRulesCache;
+  try {
+    const raw = await env.IPTV_KV.get('admin:groupRules');
+    if (raw) {
+      const custom = JSON.parse(raw);
+      _groupRulesCache = {
+        keywords:   { ...DEFAULT_GROUP_RULES.keywords,   ...(custom.keywords   || {}) },
+        groupOrder: { ...DEFAULT_GROUP_RULES.groupOrder, ...(custom.groupOrder || {}) },
+      };
+    } else {
+      _groupRulesCache = { keywords: { ...DEFAULT_GROUP_RULES.keywords }, groupOrder: { ...DEFAULT_GROUP_RULES.groupOrder } };
+    }
+  } catch {
+    _groupRulesCache = { keywords: { ...DEFAULT_GROUP_RULES.keywords }, groupOrder: { ...DEFAULT_GROUP_RULES.groupOrder } };
+  }
+  return _groupRulesCache;
+}
+
+function detectGroup(name, region, rules) {
+  const kw  = (rules && rules.keywords) ? rules.keywords : DEFAULT_GROUP_RULES.keywords;
+  const n   = name.toUpperCase();
+  const has = (cat) => (kw[cat] || []).some(x => n.includes(x.toUpperCase()));
 
   if (region === "中国大陆") {
     if (n.includes("CCTV") || n.includes("央视")) return "中国大陆 | 央视";
     if (n.includes("卫视"))   return "中国大陆 | 卫视";
-    if (has(kSports))  return "中国大陆 | 体育";
-    if (has(kNews))    return "中国大陆 | 新闻";
-    if (has(kMovie))   return "中国大陆 | 影视";
-    if (has(kVariety)) return "中国大陆 | 综艺";
+    if (has("体育"))  return "中国大陆 | 体育";
+    if (has("新闻"))  return "中国大陆 | 新闻";
+    if (has("影视"))  return "中国大陆 | 影视";
+    if (has("综艺"))  return "中国大陆 | 综艺";
     return "中国大陆 | 其他";
   }
   if (["香港","澳门"].some(x=>region.includes(x)) || ["TVB","PHOENIX","翡翠","凤凰"].some(x=>n.includes(x))) {
-    if (has(kNews))    return "中国香港 | 新闻";
-    if (has(kMovie))   return "中国香港 | 影视";
-    if (has(kSports))  return "中国香港 | 体育";
-    if (has(kVariety)) return "中国香港 | 综艺";
+    if (has("新闻"))  return "中国香港 | 新闻";
+    if (has("影视"))  return "中国香港 | 影视";
+    if (has("体育"))  return "中国香港 | 体育";
+    if (has("综艺"))  return "中国香港 | 综艺";
     return "中国香港 | 综合";
   }
   if (region.includes("台湾") || ["东森","中天","三立","年代","TVBS"].some(x=>n.includes(x))) {
-    if (has(kNews))    return "中国台湾 | 新闻";
-    if (has(kMovie))   return "中国台湾 | 影视";
-    if (has(kSports))  return "中国台湾 | 体育";
-    if (has(kVariety)) return "中国台湾 | 综艺";
+    if (has("新闻"))  return "中国台湾 | 新闻";
+    if (has("影视"))  return "中国台湾 | 影视";
+    if (has("体育"))  return "中国台湾 | 体育";
+    if (has("综艺"))  return "中国台湾 | 综艺";
     return "中国台湾 | 综合";
   }
-  if (has(kNews))    return "国际频道 | 新闻";
-  if (has(kMovie))   return "国际频道 | 影视";
-  if (has(kSports))  return "国际频道 | 体育";
-  if (has(kMusic))   return "国际频道 | 音乐";
-  if (has(kGame))    return "国际频道 | 游戏";
+  if (has("新闻"))  return "国际频道 | 新闻";
+  if (has("影视"))  return "国际频道 | 影视";
+  if (has("体育"))  return "国际频道 | 体育";
+  if (has("音乐"))  return "国际频道 | 音乐";
+  if (has("游戏"))  return "国际频道 | 游戏";
   return "国际频道 | 综合";
 }
 
@@ -301,7 +331,7 @@ async function loadSources(env) {
 // ============================================================
 //  M3U 解析
 // ============================================================
-function parseM3U(content, region, aliases, filters) {
+function parseM3U(content, region, aliases, filters, groupRules) {
   const extracted = [];
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -314,7 +344,7 @@ function parseM3U(content, region, aliases, filters) {
           const name  = normalizeName(rawName, aliases);
           // 过滤黑白名单
           if (!isChannelAllowed(name, filters)) continue;
-          const group = detectGroup(name, region);
+          const group = detectGroup(name, region, groupRules);
           extracted.push({ group, name, link });
         }
       }
@@ -323,8 +353,9 @@ function parseM3U(content, region, aliases, filters) {
   return extracted;
 }
 
-function sortKey(g, n) {
-  const gOrder = GROUP_ORDER[g] ?? 999;
+function sortKey(g, n, groupOrder) {
+  const go     = groupOrder || DEFAULT_GROUP_RULES.groupOrder;
+  const gOrder = go[g] ?? 999;
   if (g.includes("央视")) {
     const numMap = { 'CCTV5+': 5.5, 'CCTV4K': 18, 'CCTV8K': 19 };
     if (numMap[n] !== undefined) return [gOrder, 0, numMap[n], ''];
@@ -504,10 +535,11 @@ async function buildAll(env) {
   const startTime = Date.now();
 
   // 并行加载配置
-  const [sourcesRaw, aliases, filters] = await Promise.all([
+  const [sourcesRaw, aliases, filters, groupRules] = await Promise.all([
     loadSources(env),
     loadAliases(env),
     loadFilters(env),
+    loadGroupRules(env),
   ]);
 
   const sourceLines = sourcesRaw.split('\n').filter(l => l.trim() && !l.startsWith('#'));
@@ -524,7 +556,7 @@ async function buildAll(env) {
         });
         if (!resp.ok) return { url, region, error: `HTTP ${resp.status}`, channels: [] };
         const text     = await resp.text();
-        const channels = parseM3U(text, region, aliases, filters);
+        const channels = parseM3U(text, region, aliases, filters, groupRules);
         return { url, region, channels, parsed: channels.length };
       } catch(e) {
         return { url, region, error: e.message, channels: [] };
@@ -554,8 +586,8 @@ async function buildAll(env) {
   const items = [...channelsMap.entries()].sort((a, b) => {
     const [ag, an] = a[0].split('\x00');
     const [bg, bn] = b[0].split('\x00');
-    const ka = sortKey(ag, an);
-    const kb = sortKey(bg, bn);
+    const ka = sortKey(ag, an, groupRules.groupOrder);
+    const kb = sortKey(bg, bn, groupRules.groupOrder);
     for (let i = 0; i < ka.length; i++) {
       if (ka[i] < kb[i]) return -1;
       if (ka[i] > kb[i]) return 1;
@@ -732,7 +764,7 @@ function renderStatusPage(meta, baseUrl, usage, history) {
   const fmtDate = iso => new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 
   const sortedGroups = Object.entries(meta.groupCounts)
-    .sort((a,b) => (GROUP_ORDER[a[0]]??999) - (GROUP_ORDER[b[0]]??999));
+    .sort((a,b) => (DEFAULT_GROUP_RULES.groupOrder[a[0]]??999) - (DEFAULT_GROUP_RULES.groupOrder[b[0]]??999));
 
   const regionMap = {};
   for (const [g, c] of sortedGroups) {
@@ -1103,7 +1135,7 @@ function renderStatusPage(meta, baseUrl, usage, history) {
 // ============================================================
 //  管理页 HTML
 // ============================================================
-function renderAdminPage(sources, filters, aliases, config, msg = '') {
+function renderAdminPage(sources, filters, aliases, config, groupRules, msg = '') {
   const sourcesVal  = (sources  || '').replace(/</g,'&lt;');
   const filtersVal  = JSON.stringify(filters  || { blacklist: [], whitelist: [] }, null, 2);
   const aliasesVal  = JSON.stringify(aliases  || {}, null, 2);
@@ -1116,6 +1148,17 @@ function renderAdminPage(sources, filters, aliases, config, msg = '') {
     if (minutes < 1440) return `${+(minutes / 60).toFixed(1)} 小时`;
     return '24 小时';
   }
+
+  // 预序列化，避免在模板字符串内部出现嵌套对象字面量导致解析错误
+  const _defaultKeywordsJson = JSON.stringify({
+    "新闻": ["新闻","NEWS","资讯","财经","早安"],
+    "体育": ["体育","运动","足球","篮球","竞技","五星","EUROSPORT","SPORT"],
+    "影视": ["电影","影院","剧场","CHC","影视","剧集","MOVIE","HBO","星河"],
+    "综艺": ["综艺","娱乐","生活","时尚"],
+    "音乐": ["音乐","MTV","MEZZO","CLASSIC"],
+    "游戏": ["游戏","电竞","动漫"],
+  });
+  const _defaultGroupOrderJson = JSON.stringify(DEFAULT_GROUP_RULES.groupOrder);
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1174,6 +1217,24 @@ function renderAdminPage(sources, filters, aliases, config, msg = '') {
   .slider-unit { font-size: 12px; color: #aaa; }
   .slider-ticks { display: flex; justify-content: space-between; font-size: 10px; color: #bbb; margin-top: 4px; padding: 0 2px; }
   @media (max-width: 600px) { .cfg-grid { grid-template-columns: 1fr; } }
+  /* 分组规则 */
+  .kw-section { margin-bottom: 18px; }
+  .kw-section-title { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .kw-badge { font-size: 10px; background: #f1f5f9; color: #888; padding: 1px 7px; border-radius: 10px; font-weight: 400; }
+  .kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 30px; }
+  .kw-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 16px; font-size: 12px; font-weight: 500; }
+  .kw-tag-builtin { background: #f1f5f9; color: #888; border: 1px solid #e5e7eb; }
+  .kw-tag-custom  { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+  .kw-tag-del { cursor: pointer; color: #aaa; font-size: 13px; }
+  .kw-tag-del:hover { color: #ef4444; }
+  .go-row { display: grid; grid-template-columns: 1fr 80px; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .go-row input[type=text] { padding: 6px 10px; border: 1.5px solid #e5e7eb; border-radius: 8px; font-size: 12px; font-family: inherit; outline: none; transition: border-color .2s; }
+  .go-row input[type=text]:focus { border-color: #2563eb; }
+  .go-row input[type=number] { padding: 6px 8px; border: 1.5px solid #e5e7eb; border-radius: 8px; font-size: 12px; font-family: inherit; outline: none; text-align: center; transition: border-color .2s; }
+  .go-row input[type=number]:focus { border-color: #2563eb; }
+  .go-del { background: none; border: none; cursor: pointer; color: #ddd; font-size: 16px; line-height: 1; padding: 0 2px; }
+  .go-del:hover { color: #ef4444; }
+  .go-header { display: grid; grid-template-columns: 1fr 80px 24px; gap: 8px; font-size: 11px; color: #aaa; padding: 0 2px 4px; }
 </style>
 </head>
 <body>
@@ -1247,6 +1308,36 @@ function renderAdminPage(sources, filters, aliases, config, msg = '') {
     </div>
   </div>
 
+  <!-- ===== 分组规则 ===== -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">🗂️ 频道分组规则</div>
+    </div>
+    <div class="card-desc">
+      自定义频道分类的关键词匹配规则和分组排序。修改后下次构建生效。<br>
+      <b>灰色标签</b>为内置默认关键词（不可删除），<b>蓝色标签</b>为自定义追加。
+    </div>
+    <div class="hint-box">
+      💡 关键词不区分大小写。匹配优先级：央视 > 卫视 > 体育 > 新闻 > 影视 > 综艺 > 其他。
+    </div>
+
+    <div id="kw-sections"></div>
+
+    <div class="section-sep"></div>
+
+    <div class="card-title" style="margin-bottom:6px">📋 分组排序权重</div>
+    <div class="card-desc">数字越小排越前。内置分组可修改权重，也可添加自定义分组名称。</div>
+    <div class="go-header"><span>分组名称</span><span>排序权重</span><span></span></div>
+    <div id="go-rows"></div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-primary" onclick="addGoRow()">＋ 添加分组</button>
+    </div>
+
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn btn-primary" onclick="saveGroupRules()">💾 保存分组规则</button>
+    </div>
+  </div>
+
   <!-- ===== 定时与缓存设置 ===== -->
   <div class="card">
     <div class="card-head">
@@ -1309,6 +1400,13 @@ function renderAdminPage(sources, filters, aliases, config, msg = '') {
 
   // 服务端注入的当前完整 config，saveConfig 时用于合并，避免覆盖其他字段
   const currentConfig = ${JSON.stringify(cfg)};
+
+  // 服务端注入的当前分组规则（仅自定义覆盖部分，不含内置默认值）
+  const currentGroupRules = ${JSON.stringify(groupRules)};
+
+  // 内置默认关键词（用于展示，不可删除，只能在管理页追加/修改）
+  const DEFAULT_KEYWORDS = ${_defaultKeywordsJson};
+  const DEFAULT_GROUP_ORDER = ${_defaultGroupOrderJson};
 
   // ---- 辅助：缓存时长友好显示 ----
   function formatCacheVal(minutes) {
@@ -1456,9 +1554,137 @@ function renderAdminPage(sources, filters, aliases, config, msg = '') {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
+  // ============================================================
+  //  分组规则管理
+  // ============================================================
+
+  // 合并内置 + 自定义关键词（内置只读，自定义可增删）
+  const kwState = {};
+  for (const cat of Object.keys(DEFAULT_KEYWORDS)) {
+    kwState[cat] = {
+      builtin: [...DEFAULT_KEYWORDS[cat]],
+      custom:  [...(currentGroupRules.keywords?.[cat] || [])],
+    };
+  }
+
+  function renderKwSections() {
+    const container = document.getElementById('kw-sections');
+    container.innerHTML = '';
+    for (const [cat, data] of Object.entries(kwState)) {
+      const section = document.createElement('div');
+      section.className = 'kw-section';
+      const builtinTags = data.builtin.map(kw =>
+        \`<span class="kw-tag kw-tag-builtin">\${kw}</span>\`
+      ).join('');
+      const customTags = data.custom.map(kw =>
+        \`<span class="kw-tag kw-tag-custom">\${kw}<span class="kw-tag-del" onclick="delKw('\${cat}','\${kw.replace(/'/g,"\\'")}')" title="删除">✕</span></span>\`
+      ).join('');
+      section.innerHTML = \`
+        <div class="kw-section-title">
+          \${cat}
+          <span class="kw-badge">共 \${data.builtin.length + data.custom.length} 个关键词</span>
+        </div>
+        <div class="kw-row" id="kw-row-\${cat}">\${builtinTags}\${customTags}</div>
+        <div class="inline-add" style="margin-bottom:4px">
+          <input id="kw-input-\${cat}" type="text" placeholder="添加关键词，回车确认"
+            onkeydown="if(event.key==='Enter')addKw('\${cat}')"/>
+          <button class="btn btn-primary" style="padding:7px 14px;font-size:12px" onclick="addKw('\${cat}')">添加</button>
+        </div>\`;
+      container.appendChild(section);
+    }
+  }
+
+  function addKw(cat) {
+    const input = document.getElementById(\`kw-input-\${cat}\`);
+    const v = input.value.trim().toUpperCase();
+    if (!v) return;
+    if (kwState[cat].builtin.includes(v) || kwState[cat].custom.includes(v)) {
+      input.value = ''; return;
+    }
+    kwState[cat].custom.push(v);
+    input.value = '';
+    renderKwSections();
+  }
+
+  function delKw(cat, kw) {
+    kwState[cat].custom = kwState[cat].custom.filter(k => k !== kw);
+    renderKwSections();
+  }
+
+  // ---- 分组排序 ----
+  // 合并内置 + 自定义 groupOrder
+  const goState = { ...DEFAULT_GROUP_ORDER, ...(currentGroupRules.groupOrder || {}) };
+
+  function renderGoRows() {
+    const container = document.getElementById('go-rows');
+    container.innerHTML = '';
+    const entries = Object.entries(goState).sort((a,b) => a[1] - b[1]);
+    for (const [name, order] of entries) {
+      const isBuiltin = name in DEFAULT_GROUP_ORDER;
+      const row = document.createElement('div');
+      row.className = 'go-row';
+      row.innerHTML = \`
+        <input type="text" value="\${name}" \${isBuiltin ? 'readonly style="background:#fafafa;color:#888"' : ''}
+          data-orig="\${name}" oninput="updateGoName(this)"/>
+        <input type="number" value="\${order}" min="0" max="9999"
+          data-name="\${name}" oninput="updateGoOrder(this)"/>
+        \${isBuiltin
+          ? '<span style="font-size:11px;color:#ddd;text-align:center;line-height:28px">内置</span>'
+          : \`<button class="go-del" onclick="delGoRow('\${name.replace(/'/g,"\\'")}')">✕</button>\`
+        }
+      \`;
+      container.appendChild(row);
+    }
+  }
+
+  function updateGoName(input) {
+    const orig = input.dataset.orig;
+    const newName = input.value;
+    if (orig === newName || !newName.trim()) return;
+    const val = goState[orig];
+    delete goState[orig];
+    goState[newName] = val;
+    input.dataset.orig = newName;
+  }
+
+  function updateGoOrder(input) {
+    const name = input.dataset.name;
+    goState[name] = parseInt(input.value) || 0;
+  }
+
+  function addGoRow() {
+    const key = '新分组 | 综合';
+    goState[key] = 999;
+    renderGoRows();
+  }
+
+  function delGoRow(name) {
+    delete goState[name];
+    renderGoRows();
+  }
+
+  async function saveGroupRules() {
+    // 只保存与默认值不同的内容（自定义关键词 + 所有 groupOrder）
+    const customKw = {};
+    for (const [cat, data] of Object.entries(kwState)) {
+      if (data.custom.length > 0) customKw[cat] = data.custom;
+    }
+    const payload = {
+      keywords:   customKw,
+      groupOrder: goState,
+    };
+    const data = await apiPost('/admin/save', {
+      key: 'groupRules',
+      value: JSON.stringify(payload),
+    });
+    showMsg(data.ok, data.ok ? '分组规则已保存，下次构建生效' : data.error);
+  }
+
   // ---- 初始化 ----
   renderTags();
   renderAliasRows();
+  renderKwSections();
+  renderGoRows();
 </script>
 </body>
 </html>`;
@@ -1578,15 +1804,17 @@ export default {
 
     // ---- 管理页 GET ----
     if (path === '/admin' && request.method === 'GET') {
-      const [sourcesRaw, filtersRaw, aliasesRaw, cfg] = await Promise.all([
+      const [sourcesRaw, filtersRaw, aliasesRaw, cfg, groupRulesRaw] = await Promise.all([
         env.IPTV_KV.get('admin:sources'),
         env.IPTV_KV.get('admin:filters'),
         env.IPTV_KV.get('admin:aliases'),
         loadConfig(env),
+        env.IPTV_KV.get('admin:groupRules'),
       ]);
-      const filters = filtersRaw ? JSON.parse(filtersRaw) : { blacklist: [], whitelist: [] };
-      const aliases = aliasesRaw ? JSON.parse(aliasesRaw) : {};
-      return new Response(renderAdminPage(sourcesRaw || '', filters, aliases, cfg), {
+      const filters    = filtersRaw    ? JSON.parse(filtersRaw)    : { blacklist: [], whitelist: [] };
+      const aliases    = aliasesRaw    ? JSON.parse(aliasesRaw)    : {};
+      const groupRules = groupRulesRaw ? JSON.parse(groupRulesRaw) : { keywords: {}, groupOrder: {} };
+      return new Response(renderAdminPage(sourcesRaw || '', filters, aliases, cfg, groupRules), {
         headers: { 'Content-Type': 'text/html; charset=utf-8' }
       });
     }
@@ -1596,7 +1824,7 @@ export default {
       try {
         const body = await request.json();
         const { key, value } = body;
-        if (!['sources','filters','aliases','config'].includes(key)) {
+        if (!['sources','filters','aliases','config','groupRules'].includes(key)) {
           return new Response(JSON.stringify({ ok: false, error: '非法 key' }), {
             status: 400, headers: { 'Content-Type': 'application/json' }
           });
@@ -1607,8 +1835,9 @@ export default {
         } else {
           await env.IPTV_KV.put(kvKey, value);
         }
-        // 清除别名缓存
+        // 清除相关缓存
         _aliasCache = null;
+        _groupRulesCache = null;
         return new Response(JSON.stringify({ ok: true }), {
           headers: { 'Content-Type': 'application/json' }
         });
